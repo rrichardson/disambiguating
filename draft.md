@@ -68,7 +68,11 @@ This means that data structures in memory can be more complex and nuanced than d
 
 Because of the massive latency costs that hard disks impose, one optimization that is found in nearly every operating system is the page cache, or buffer cache.
 
-The 
+As its name implies, the purpose of the page cache is to optimize disk access by transparently storing contents of files in memory pages in the kernel.  The idea is that the same local parts of a disk or a file will be read or written many times in a short period of time.  This is especially true for databases. 
+
+When a read occurs, if the file contents are not in the cache, it will simultaneously load the data into the cache, and also return the data. A write will modify the contents of the cache, but not necessarily write to the hard disk itself.  This is to eliminate as many disk accesses as possible.  If, in the course of updating an index in a transaction you have to modify 20 locations on disk, modifying the cache and then flushing only once will only take 5ms instead of 100ms. 
+
+> CAUTION : The page cache, while a huge source of optimization can also be a source of danger. If writes to the page cache are not flushed to disk, and a power, disk or kernel failure occurs, YOU WILL LOSE YOUR DATA. 
  
 ## The features of a database
 
@@ -127,13 +131,21 @@ Note that these 5 steps are where every transactional database system keeps its 
 
 #### Transaction Performance (Summary) 
 
+Where N is the number of fields written, and M is the number of fields read. 
 
-- Store transaction to transaction log - 1 disk seek. 1 sequential write
-- Lock various rows - N memory seeks / modifications, disrupt concurrency
-- (Optionally) Consistency and Integrity checks - N disk and/or memory seeks
-- Move new structures into place - 1 to N memory seeks.
-- Flush memory mapped changes to disk. 
+- Store transaction to transaction log - 1 disk write, 1 disk flush. 5ms
+- Lock various rows - N+M disk seeks and reads then write.
+- (Optionally) Consistency and Integrity checks - M disk reads. (hopefully cached)
+- Move new structures into place - N memory seeks, possibly disk seeks depending on transaction style.
+- Mark transaction as completed in log. 1 disk write
+- Flush cache changes to disk. 
+
 Total cost: 
+2 guaranteed disk seeks. 
+2 guaranteed disk writes. 
+0 to max(N+M)/2 additional disk seeks depending on page cache hits. 
+------
+10ms or more
 
 ### Persistence
 
