@@ -119,15 +119,16 @@ A very important trait indeed. Durability simply promises that when the transact
 
 There are 4 steps that are common to an ACID transaction: 
 
-1. Log the incoming request to persistent storage in a transaction log. This will protect the data in case of a system failure. In the worst case scenario, this transaction will be able to be re-started from the log upon start-up. 
+1. Log the incoming request to persistent storage in a transaction log (also known as a Write Ahead Log) This will protect the data in case of a system failure. In the worst case scenario, this transaction will be able to be re-started from the log upon start-up. 
 2. Serialize the new values to the index and table data structures in a way that doesn't interfere with existing operations. 
 3. Obtain write locks on all cells that need to be modified. Depending on the operation in question and the database. This might mean locking the entire table, the row, or possible the memory page. 
 4. Move the new values into place. 
-5. Flush all changes to disk. 
+5. Record the transaction as completed in the transaction log.
+6. Flush all changes to disk. 
 
-Note that these 5 steps are where every transactional database system keeps its secret sauce.  Transactions come at a significant cost. To be able to optimize this process even a little bit will provide customers with an advantage. Every DBMS will execute steps 1-4 in many different ways. They might try to execute all or some of the steps in parallel, they might leverage highly specialized data structure systems, such as MVCC, which reduce the need for locking.  In future articles, we will survey prevailing technologies and their approaches. 
+Note that these 5 steps are where every transactional database system keeps its secret sauce.  Transactions come at a significant cost. To be able to optimize this process even a little bit will provide customers with an advantage. Every DBMS will execute steps 1-5 in many different ways. They might try to execute all or some of the steps in parallel, they might leverage highly specialized data structure systems, such as MVCC, which reduce the need for locking.  In future articles, we will survey prevailing technologies and their approaches. 
 
-> *A note on NoSQL:  The biggest "innovation" touted by most NoSQL databases was simply achieving faster operations by removing transactions. It has been stated that NoSQL should more correctly be termed NoACID. *
+> *A note on NoSQL:  The biggest "innovation" touted by most NoSQL databases was simply achieving faster operations by removing transactions. It has been stated that NoSQL should more correctly be termed NoACID. One thing to note, when a system supports locking on its data structures, it creates an overhead for every operation on every data structure that might be blocked on a lock. Speedups can be achieved if a database can provide atomic updates to rows without locking, but then transactions become difficult or impossible.*
 
 #### Transaction Performance (Summary) 
 
@@ -149,35 +150,42 @@ Total cost:
 
 ### Persistence
 
-As was stated above, transactions and even indexing are completely optional within databases, depending on their scope. Persistence, however, is the raison d'etre of a database. 
+As was stated above, transactions and even indexing are completely optional within databases. Persistence, however, is the raison d'etre of a database. 
 
----more stuff
+Since the performance game in a database is to minimize disk seeks, we must devise a plan to find the home of a piece of data quickly.  This includes minimizing disk seeks, and also storing data with maximum locality so as to minimize cache load times, and maximize chances for cache hits. 
 
-So how do you find rows in a database on disk while minimizing disk seeks? You have two options: 
-
-1. Read the entire database table into memory (not often possible, and not really recommended)
-
-2. Store your record data in its own index. This is often referred to as a table index. While it is often a tree style index in its own right, it is also responsible for storing the record data itself. So it is not to be confused with the indexing step we'll be discussing in the next section.
-
+To do this, we'll need to store the record data in its own tree based data structure. This is often referred to as a table index. It is technically an index, because trees are tools for efficient look-up.  But we'll use a data structure designed to store large amounts of data while minimizing disk seeks. 
 
 There are two tree style on disk data structures that form the basis of almost all database storage. 
 
 1. B+ Tree
 A B+ Tree is a B-tree style index data structure that is optimized for, you guessed it, minimizing disk seeks.  It is one of the most common storage mechanisms in databases for table storage. It is also the data structure of choice for almost all modern filesystems.  
 
+-- pretty picture of a b+tree
 
 2. Log Structured Merge Tree
 The LSM-tree is a newer disk storage structure that is optimized for a high volume of sequential writes.  It was designed to handle massive amounts of streaming events, such as for receiving web server access logs in real-time for later analysis.
 
-Despite its origins in log style event collection, it is beginning to be adopted by relational databases as well. 
+Despite its origins in log style event collection, it is beginning to be considered for relational databases as well. 
 
--- more details
+-- pretty picture of a log structured merge tree
 
-3. Write Flush Queue
-
--- more details
 
 ### Indexing
+
+Data is rarely stored as isolated values. Typically heterogeneous collections of fields which make up a record. In relational databases, those fields are called columns, and they are fixed to the schema that defines the tables. 
+
+In non-relational databases, heterogeneous fields are still often accommodated and even indexed. When you want to look up a table by specifying one of the fields in a record, that field needs to be part of an index.  
+
+An index is just a data structure for performing random lookups of a specified field (or, where supported, a tuple of specified fields)
+
+As usual, a b-tree style index is the the tool of choice for most database indexes since they efficiently support hard disks. B-trees can accommodate inserts efficiently without having to (re)allocate storage cells for each operation.
+
+There are other options, however.  For instance, a bitmap index is a data-structure that provides very efficient join queries of multiple tables. 
+
+Tree style indexes grow linearly for the number of items items in the tree, and search time grows with the depth of the tree (a logarithmic function of the total depth) 
+
+Bitmap indices, on the other hand, grow with the number of *different* items in a column. 
 
 The value found at the key in an index is actually a pointer back to where the row is physically stored. This can be done two ways:  
 
