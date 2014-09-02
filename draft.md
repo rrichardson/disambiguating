@@ -1,12 +1,12 @@
 # Disambiguating Databases
 
-The topic of data storage is one that doesn't to be well understood until something goes wrong (data disappears), or something goes really right (too many customers). Because databases can be treated like black boxes with an API, their inner workings are often overlooked. They're often treated as magic things that just take data when offered, and supply it when I asked. Since these two operations are the only understood activities of the technology, they are the only feature points used when one is comparing different technologies.
+The topic of data storage is one that doesn't need to be well understood until something goes wrong (data disappears), or something goes really right (too many customers). Because databases can be treated like black boxes with an API, their inner workings are often overlooked. They're often treated as magic things that just take data when offered, and supply it when I asked. Since these two operations are the only understood activities of the technology, they are often the only feature points presented when one is comparing different technologies.
 
 But what exactly is an *operation*? Within the realm of databases, this could mean any number of things. Is that operation a transaction? Is it an indexing of data? A retrieval from an index? Does it store the data to a durable medium like a hard disk, or does it beam it by laser towards Alpha Centauri? 
 
 It is this ambiguity that causes havoc in the software industry. Misunderstanding the features and guarantees of a database system can cause, at best, user consternation due to slowness or unavailability. At worst, it could result in fiscal damage, or even jail time due to loss data. 
 
-The scope of the term "database" is vast.  Technically speaking, anything that stores data for later retrieval is a database. Even by that broad definition, there is functionality that is common to most databases.  The scope of this article is to enumerate those features.  The intent is to provide the reader with a tool-set with which they might evaluate databases on their relative merits. 
+The scope of the term "database" is vast.  Technically speaking, anything that stores data for later retrieval is a database. Even by that broad definition, there is functionality that is common to most databases.  The scope of this article is to enumerate those features at a high level.  The intent is to provide the reader with a tool-set with which they might evaluate databases on their relative merits. 
 
 Applying this feature driven approach, the reader should see two benefits. Firstly, it will allow them to accurately assess their own needs. Secondly, it will allow them to compare technologies by pairing up like features. When viewed with with this lens, comparative benchmarks will only be valid on databases that are performing equal work and providing the same guarantees.
 
@@ -42,7 +42,7 @@ Since this article is about comparing the performance characteristics of differe
 
 The highest latency operation you will encounter within a data center is a seek to a random location on a hard disk. For the purposes of this article, all timings presented will be for that of a 7200 RPM drive, which is typical of a multi-terabyte commodity drive found in data intensive applications.
 
-> *SSDs have brought massive latency and throughput improvements to disks. The same seek on an SSD is about 60 times faster. They bring their own challenges, however, one interesting one is that the storage cells within an SSD have a fixed lifetime, that is, they can only handle so many writes to them before they fail.  So they have specialized firmware that spreads writes around the disk, garbage collects, and does other bookkeeping operations. Because of this, they have less predictable performance characteristics (though they are predictably faster than hard disks) *
+> *SSDs have brought massive latency and throughput improvements to disks. A seek on an SSD is about 60 times faster than a hard disk. They bring their own challenges, however, one interesting one is that the storage cells within an SSD have a fixed lifetime, that is, they can only handle so many writes to them before they fail.  For this reason, they have specialized firmware that spreads writes around the disk, garbage collects, and does other bookkeeping operations. Because of this, they have less predictable performance characteristics (though they are predictably faster than hard disks) *
 
 It takes 4.17 milliseconds to seek to a random location on a hard disk. This is because the spindle on which the data is stored actually has to start rotating, spin to the correct location, then stop accurately to within a nanometer. Frankly it is amazing that they are as fast as they are. 
 
@@ -130,7 +130,7 @@ Note that these 5 steps are where every transactional database system keeps its 
 
 > *A note on NoSQL:  The biggest "innovation" touted by most NoSQL databases was simply achieving faster operations by removing transactions. It has been stated that NoSQL should more correctly be termed NoACID. One thing to note, when a system supports locking on its data structures, it creates an overhead for every operation on every data structure that might be blocked on a lock. Speedups can be achieved if a database can provide atomic updates to rows without locking, but then transactions become difficult or impossible.*
 
-#### Transaction Performance (Summary) 
+#### Transaction Performance Summary
 
 Where N is the number of fields written, and M is the number of fields read. 
 
@@ -148,6 +148,8 @@ Total cost:
 ------
 10ms or more
 
+> Note on performance. Transactions can actually improve performance of large amounts of serial reads and writes.  This is because a transaction only guarantees durability at the end of a transaction. This means that even if there are thousands of rows read/written to disk, it only needs a single flush from page-cache to disk.  This fact of course depends on two things: An operating system which supports a write-back instead of a write-through page cache. It also requires having a large enough page cache to contain all of the writes. 
+
 ### Persistence
 
 As was stated above, transactions and even indexing are completely optional within databases. Persistence, however, is the raison d'etre of a database. 
@@ -161,15 +163,36 @@ There are two tree style on disk data structures that form the basis of almost a
 1. B+ Tree
 A B+ Tree is a B-tree style index data structure that is optimized for, you guessed it, minimizing disk seeks.  It is one of the most common storage mechanisms in databases for table storage. It is also the data structure of choice for almost all modern filesystems.  
 
--- pretty picture of a b+tree
+\#\#\# pretty picture of a b+tree \#\#\#
 
 2. Log Structured Merge Tree
+
 The LSM-tree is a newer disk storage structure that is optimized for a high volume of sequential writes.  It was designed to handle massive amounts of streaming events, such as for receiving web server access logs in real-time for later analysis.
 
-Despite its origins in log style event collection, it is beginning to be considered for relational databases as well. 
+Despite its origins in log style event collection, it is beginning to be considered for relational databases as well.  There is a major trade-off in an LSM tree, you cannot delete or update in an LSM data structure. Such events are recorded as new records in the log. When reading an LSM tree, one typically starts from the back in order to read the newest version of the data.  
 
--- pretty picture of a log structured merge tree
+Periodically, the records which have been made obsolete by subsequent deletes or updates must be garbage collected. 
 
+\#\#\# pretty picture of a log structured merge tree \#\#\#
+
+#### Persistence Performance Summary
+
+To find a location in the tree, it is log(b, n) number of searches, where b is the branching factor of the tree and N is the number of items in the tree.   For instance, if it had a branching factor of 10, it would take 6 searches, worst case, to find the spot in the tree to insert. This could mean 6 disk seeks. The default branching factor in many on-disk database b-trees is 128, so we'll assume that for the rest of this article. 
+
+In addition to the insert itself, the tree nodes might need to be split and rebalanced, which could result in additional seeks, although the items in question are likely now in the cache. 
+
+If the database uses MVCC, the tree might be a bit more complex, as it would store and replace nodes which represent versions of the data, as well as the data itself. 
+
+For LSM trees, lets assume that the write to the memory-log causes it to pass a threshold and it needs to be merged to the on-disk log. The write to disk is similar to the B+Tree write above, but it is done in large batches, and since all of the writes are ordered, it is typically done in a small set of sequential writes.  
+
+The LSM tree has two background tasks which must occur frequently which can put additional load on the server and the disk.  It has to frequently flush the data in the memory portion onto the disk. Secondly, it must perform its compacting step against the on-disk portion. The second step can invoke significant overhead. 
+
+B+Tree
+lookup or update :  log base 128 of N disk seeks
+rebalance on update : log base 128 of N disk seeks
+
+LSM Tree
+lookup+rebalance every M operations, where M is the maximum population of the in-memory structure.
 
 ### Indexing
 
@@ -177,18 +200,56 @@ Data is rarely stored as isolated values. Typically heterogeneous collections of
 
 In non-relational databases, heterogeneous fields are still often accommodated and even indexed. When you want to look up a table by specifying one of the fields in a record, that field needs to be part of an index.  
 
-An index is just a data structure for performing random lookups of a specified field (or, where supported, a tuple of specified fields)
+An index is just a data structure for performing random lookups of a specified field (or, where supported, a tuple of specified fields). To avoid ambiguity with the table index described in Persistence, we will call these lookup indices. 
 
-As usual, a b-tree style index is the the tool of choice for most database indexes since they efficiently support hard disks. B-trees can accommodate inserts efficiently without having to (re)allocate storage cells for each operation.
+#### To Tree, or not to Tree
+
+As usual, a b-tree style index is the the tool of choice for most lookup indices since they efficiently support hard disks. B-trees can accommodate inserts efficiently without having to (re)allocate storage cells for each operation. They also tend to be flat in structure, which reduces the number of nodes which need to be searched, therefor reducing the number of potential disk seeks. 
 
 There are other options, however.  For instance, a bitmap index is a data-structure that provides very efficient join queries of multiple tables. 
 
 Tree style indexes grow linearly for the number of items items in the tree, and search time grows with the depth of the tree (a logarithmic function of the total depth) 
 
-Bitmap indices, on the other hand, grow with the number of *different* items in a column. 
+Bitmap indices, on the other hand, grow with the number of *different* items in a column.  As the name implies, they build bitmaps which represent the membership of values for all relevant columns.  Multiple boolean operations against bitmap indexes are very fast, they themselves produce new bitmaps which can be cached efficiently as search results. 
+
+One of the other major innovations of bitmap indices is that they can be compressed, and they can even perform query operations while compressed. This makes storage, retrieval faster. It also makes them more CPU cache friendly, which can further reduce latencies. 
+
+#### Lookup Index to Table Index Referencing
 
 The value found at the key in an index is actually a pointer back to where the row is physically stored. This can be done two ways:  
 
-1. Storing the physical offset directly.  The advantage here is incredibly fast lookups.  The downside is that all write speed is reduced because any time more data is inserted, all effected values must have their offsets updated.  This effect can be mitigated in trees which store only a handful of rows per leaf. 
+1. Storing the physical offset directly.  The advantage here is incredibly fast lookups.  The downside is that write speed is reduced. Whenever more data is inserted into the table index, all effected storage locations must have their new offsets updated within the lookup index.  
 
 2. Storing the ID of the row.  This means that the database must, in turn, look up the row in the table index by ID. The upside of this extra layer of indirection is no modification is necessary when new data is added. 
+
+#### Index Performance Summary
+
+The cost of B-Tree style indices are discussed above. In the case of lookup-indices, they store less data, and are often optimized to better fit into the page cache, and even the CPU cache.  
+
+Bitmap indices often have a much smaller memory footprint, and can sit in memory. They have one major drawback, however, and that is that they cannot be efficiently updated. Since the data is stored, quite literally as a matrix of bits packed into memory, large updates would require a full scan and modification of the index. Luckily, since these are compact, this is usually a set of in-memory operations. 
+
+costs: 
+lookup or update :  log base 128 of N disk seeks
+re-balance on update : log base 128 of N disk seeks
+
+Odds are that if a re-balance is required, the initial traversal through the tree loaded all relevant data into the page cache, so there would be no additional disk seeks. 
+
+### Pulling it all together
+
+If there is one take-away here, it is that there are many knobs to turn on a database and an operating system to optimize performance. The trade-offs all revolve around the disk.  If you don't need guaranteed, immediate durability for every operation, you can put off persisting the operation to disk, either manually in your own batches, such as the in-memory store of the LSM tree, or automatically, via the page cache. 
+
+Understand of course that the risk of data-loss is present any time you rely memory writes to speed things up. If a failure occurs, those pending writes can disappear.  If you are operating in an environment where data loss is acceptable, then by all means use in-memory structures, or don't bother flushing the page cache. 
+
+Regardless of your application, you should take time to understand the page cache in your OS. Writes that you think are safe may not be.  It, too, has many settings for fine-tuning performance.  It can be set to be highly paranoid, but busy, or somewhat lazy but fast. It is worth checking that your expectations match reality. 
+
+The same is true for comparison of database benchmarks. We now know that write benchmarks for an ACID, b-tree style database should come nowhere close to those of an LSM style log event collector. It would be silly to compare such things.  First check to see if a database's features match your requirements before comparing its speed.
+
+### References
+1. [3 way handshake](http://en.wikipedia.org/wiki/Transmission_Control_Protocol#Connection_establishment)
+2. [Page Cache](http://www.westnet.com/~gsmith/content/linux-pdflush.htm)
+3. [B+ Trees](http://en.wikipedia.org/wiki/B%2B_tree)
+4. [Bitmap Index](http://en.wikipedia.org/wiki/Bitmap_index)
+5. [Bitmap Index in GPU 1](http://www.idav.ucdavis.edu/research/projects/BIN_HASH_QUERY)
+6. [Bitmap Index in GPU 2](http://conferences.sigcomm.org/imc/2013/papers/imc014s-fuscoA.pdf)
+7. [Log Structured Merge Tree](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.44.2782&rep=rep1&type=pdf)
+8. [Latency Visualization](http://www.eecs.berkeley.edu/~rcs/research/interactive_latency.html)
