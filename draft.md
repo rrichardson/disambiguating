@@ -47,8 +47,6 @@ The highest latency operation you will encounter within a data center is a seek 
 
 > *SSDs have brought massive latency and throughput improvements to disks. A seek on an SSD is about 60 times faster than a hard disk. They bring their own challenges, however, one interesting one is that the storage cells within an SSD have a fixed lifetime, that is, they can only handle so many writes to them before they fail.  For this reason, they have specialized firmware that spreads writes around the disk, garbage collects, and does other bookkeeping operations. Because of this, they have less predictable performance characteristics (though they are predictably faster than hard disks) *
 
-It takes 4.17 milliseconds to seek to a random location on a hard disk. This is because the spindle on which the data is stored actually has to start rotating, spin to the correct location, then stop accurately to within a nanometer. Frankly it is amazing that they are as fast as they are. 
-
 Once a location has been found, successive appends-to, or reads-from, that location is significantly cheaper.  This is called a sequential read or write. 
 
 Algorithms regarding data storage and retrieval have been optimized against this fact since magnetic rotating disks were invented.
@@ -78,6 +76,21 @@ When a read occurs, if the file contents are not in the cache, it will simultane
 > CAUTION : The page cache is a significant source of optimization, but can also be a source of danger. If writes to the page cache are not flushed to disk, and a power, disk or kernel failure occurs, YOU WILL LOSE YOUR DATA. 
  
 \newpage
+
+## Types of Databases
+
+### Relational
+
+### Distributed
+
+### Log Structured
+
+### Document
+
+### Memory
+
+### Columnar
+
 
 ## The features of a database
 
@@ -112,7 +125,7 @@ This guarantee states that the state of the database will be valid to all users 
 
 Relational databases will often make an even larger set of consistency guarantees. This includes foreign key constraints, cascading operations on dependent types, or triggers that might be executed as part of this operation.
 
-What this means, in terms of performance, is that all of these operations might be running while rows and tables are locked for editing, so no other clients will be able to use those parts of the system during that time. It also, clearly effects the round-trip-time of the request.
+What this means, in terms of performance, is that all of these operations might be running while rows and/or pages are locked for editing, so no other clients will be able to use those parts of the system during that time. It also, clearly effects the round-trip-time of the request.
 
 ##### Isolation
 Transactions don't happen immediately, they occur in steps, and, like in the Atomicity example, if an outsider were to see a partial set of completed steps, results would range from "amusing" to "horrible wrong". Isolation is the guarantee that say that this won't happen.  It hides away all of the operations from others until the transaction completes successfully. 
@@ -172,13 +185,21 @@ There are two tree style on disk data structures that form the basis of almost a
 #### B+ Tree
 A B+ Tree is a B-tree style index data structure that is optimized for, you guessed it, minimizing disk seeks.  It is one of the most common storage mechanisms in databases for table storage. It is also the data structure of choice for almost all modern filesystems.  
 
-#### Log Structured Merge Tree
+#### Log Structured
 
 The LSM-tree is a newer disk storage structure that is optimized for a high volume of sequential writes.  It was designed to handle massive amounts of streaming events, such as for receiving web server access logs in real-time for later analysis.
 
 Despite its origins in log style event collection, it is beginning to be considered for relational databases as well.  There is a major trade-off in an LSM tree, you cannot delete or update in an LSM data structure. Such events are recorded as new records in the log. When reading an LSM tree, one typically starts from the back in order to read the newest version of the data.  
 
 Periodically, the records which have been made obsolete by subsequent deletes or updates must be garbage collected. 
+
+#### Columnar
+
+#### Document
+
+#### Memory
+
+#### Relational
 
 #### Persistence Performance Summary
 
