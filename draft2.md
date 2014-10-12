@@ -273,14 +273,20 @@ The different mechanisms for storage are, row store, columnar, distributed or me
 
 #### Row Based
 
-To do this, we'll need to store the record data in its own tree based data structure. This is often referred to as a table index. It is technically an index, because trees are tools for efficient look-up.  But we'll use a data structure designed to store large amounts of data while minimizing disk seeks. 
+The most common storage scheme is to store data, row by row, in a tree or some other compact data structure on a local
+hard disk. Although the exact data structures and access models vary, this mechanism is fairly universal. 
 
-There are two tree style on disk data structures that form the basis of almost all database storage. 
+In row-based storage, the rows themselves are contiguous in memory.  This clearly means that the storage model itself is
+optimized for fetching regions of entire rows of data at one time.  This is often the case in key-value stores, but
+rarely the case in relational databases. 
 
-#### B+ Tree
-A B+ Tree is a B-tree style index data structure that is optimized for, you guessed it, minimizing disk seeks.  It is one of the most common storage mechanisms in databases for table storage. It is also the data structure of choice for almost all modern filesystems.  
+There are two common data structures for storing rows, one is optimized for random retrieval, this is the B+ Tree. The 
+other is optimized for high volume, sequential writes, this is the Log Structured merge tree. 
 
-#### Log Structured
+##### B+ Tree
+A B+ Tree is a B-tree style index data structure that is optimized for, you guessed it, minimizing disk seeks.  It is one of the most common storage mechanisms in databases for table storage. It is also the data structure of choice for almost all modern filesystems.
+
+##### Log Structured
 
 The LSM-tree is a newer disk storage structure that is optimized for a high volume of sequential writes.  It was designed to handle massive amounts of streaming events, such as for receiving web server access logs in real-time for later analysis.
 
@@ -290,35 +296,63 @@ Periodically, the records which have been made obsolete by subsequent deletes or
 
 #### Columnar
 
-#### Distributed 
+Column based data stores optimize for retrieving regions of the same column of data, rather than rows of data.  For this
+reason, successive columns are stored contiguously in memory.  
+
+Because all data-types in a column are necessarily the same, compression can have a huge positive
+impact, thus increasing the amount of data that can be stored and retrieved over the bus. Also, breaking the data up
+into multiple files, one per column, can take advantage of parallel reads and writes across multiple disks simultaneously
+
+The downside of column based databases is that they are very inflexible. A simple insert or update requires a
+significant amount of coordination and calculation.  Because data is so typically tightly packed (and compressed) in
+columns, one cannot simply update the data-structures in place. Column files are typically built and rebuilt in batches to
+serve data warehousing applications for massive data sets. 
 
 #### Memory
 
+In many cases, durability is simply not a requirement.  Only fast, random data access.  This is common for systems like
+caches, which update frequently, and are optimized for nothing other than access speed.  Because data in caches is
+typically short lived, one may not need to persist to disk. This is where in-memory databases shine. 
 
+#### Distributed 
 
+The topic of distributed databases is vast, and would require its own series of articles for proper coverage. In the
+context of persistence however, there is one very relevant fact:  It is faster to copy a dataset
+across the network of a data-center than it is to store it onto local disk. It is also possible to copy this data to
+multiple machines simultaneously. 
 
-#### Relational
+Distributed databases can provide an interesting option when establishing the balance between speed and persistence.  It
+might be too risky to store data only in memory on a local machine, as data loss would be complete if the machine were
+lost.  If you copy the data across many machines, then your risk of total data lost is reduced.  It is up to the
+application developer to determine the probability of machine failure and determine the level of acceptable risk. 
 
-#### Persistence Performance Summary
+### Page-Cache Considerations
 
-To find a location in the tree, it is log base B of N number of searches, where B is the branching factor of the tree and N is the number of items in the tree.   For instance, if it had a branching factor of 10, it would take 6 searches, worst case, to find a specific node in a tree. This could mean 6 disk seeks, compare that with 19.9 for a binary tree, or 2.8 for for a tree with a branching factor of 128!. The default branching factor in many on-disk database b-trees is 128, so we'll assume that for the rest of this article. 
+When you opt to store to disk, likely the page cache will be involved, as accessing the disk directly will be far too
+cumbersome. It will also hamper the performance of any other applications running on the system, as you will be
+monopolizing the disks unneccesarily. 
 
-In addition to the insert itself, the tree nodes might need to be split and rebalanced, which could result in additional seeks, although the items in question are likely now in the cache. 
+The question of when to flush from the page-cache to disk is perhaps the most important of all when designing a
+database, as it tells you exactly how much risk you have for data loss. 
 
-If the database uses MVCC, the tree might be a bit more complex, as it would store and replace nodes which represent versions of the data, as well as the data itself. 
+Many databases purport many thousands of operations per second, often these databases operate entirely on data structures on memory
+mapped pages in the page cache. That is how they achieve their speed and throughput, they are working on in-memory data
+structures. They defer all flushing and syncing operations to the operating system itself. This
+means it is up to the kernel itself, which will take into account not only the database, but all applications running on
+the system to decide when it is most convenient to flush which pages.  This means that the actual persistence of your
+data is being left to the operating system, which does not understand your application domain, or data reliability
+requirements. 
 
-For LSM trees, lets assume that the write to the memory-log causes it to pass a threshold and it needs to be merged to the on-disk log. The write to disk is similar to the B+Tree write above, but it is done in large batches, and since all of the writes are ordered, it is typically done in a small set of sequential writes.  
+To break it down, it is important to be clear about the behavior of your database with respect to the page cache. 
 
-The LSM tree has two background tasks which must occur frequently which can put additional load on the server and the disk.  It has to frequently flush the data in the memory portion onto the disk. Secondly, it must perform its compacting step against the on-disk portion. The second step can invoke significant overhead. 
+For systems which sync automatically: 
+* If it flushes too frequently, you will have poor performance. 
+* If it flushes infrequently, it will be faster, but you risk data loss. 
 
-B+Tree
-lookup or update :  log base 128 of N disk seeks
-rebalance on update : log base 128 of N disk seeks
+It might be better to leverage a manual syncing scheme for your database, since that will provide you the control to match the guarantees your application requires. This increases the complexity of your applications, and for highly concurrent systems, this could be hard to get right, as a disk operation serving one application might interfere excessively with another application. 
 
-LSM Tree
-lookup+rebalance every M operations, where M is the maximum population of the in-memory structure.
-
-
+Systems like transactions and batch operations which sync at the end can be very beneficial. This will reduce the number of disk accesses, but there is a
+very clear guarantee as to when the data is flushed to disk. 
 
 
 ### Indexing
@@ -349,17 +383,19 @@ The value found at the key in an index is actually a pointer back to where the r
 
 2. Storing the ID of the row.  This means that the database must, in turn, look up the row in the table index by ID. The upside of this extra layer of indirection is no modification of the lookup index is necessary when new data is added to the table index.
 
-#### Index Performance Summary
+#### Indexing Performance Summary
 
-The cost of B-Tree style indices are discussed above. In the case of lookup-indices, they store less data, and are often optimized to better fit into the page cache, and even the CPU cache.  
+Unless your only data access model is a full scan of large regions of data, you will probably need indexes. However, every additional index that your data-set leverages will add increased disk and CPU load, and perhaps latency. 
 
-Bitmap indices often have a much smaller memory footprint, and can sit in memory. They have one major drawback, however, and that is that they cannot be efficiently updated. Since the data is stored, quite literally as a matrix of bits packed into memory, large updates would require a full scan and modification of the index. 
+If your system is read-heavy, and it posseses a relatively low variety of data in the columns (this is known as low
+cardinality) you can take advantage of bitmap indexes.  For everything else, there are tree indices.  
 
-costs: 
-lookup or update :  log base 128 of N disk seeks
-re-balance on update : log base 128 of N disk seeks
+Some basic rules: Index as little as possible.  Almost every database that supports adding indexes will allow you to add
+them after the data is loaded. 
 
-Odds are that if a re-balance is required, the initial traversal through the tree loaded all relevant data into the page cache, so there would be no additional disk seeks. 
+If all of your data is loaded at once (in a data-mart model, perhaps) you might benefit from creating your indexes after
+all of the data is loaded. This can even result in a more efficient index, as many indexes suffer negative effects from
+fragmentation from inserts and updates. 
 
 ### Pulling it all together
 
@@ -371,7 +407,7 @@ Regardless of your application, you should take time to understand the page cach
 
 We now know that write benchmarks for an ACID, b-tree style database should come nowhere close to those of an LSM style log event collector. It would be silly to compare such things. We also know that it would be folly to use an in-memory database to run bank transactions. 
 
-As with all software systems, check to see if a database's features match your requirements before comparing its speed.
+As with all software systems, ensure that a database's features match your requirements before comparing speed.
 
 It may just save your data. 
 
