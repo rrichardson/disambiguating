@@ -65,8 +65,7 @@ Most database systems fall distinctly into one camp, but might offer features of
 
 Relational databases have enjoyed the most popularity throughout recent history. Early on, it was because they made
 efficient use of a very rare and valuable resource, hard-disk space.  Lately, however, hard-disk space is incredibly
-cheap, they are used widely today because they are very flexible and their models are well understood. Also, SQL, the
-lingua franca of relational data, is commonly known among programmers.  
+cheap. Despite the original requirement being now irrelevant, they are still widely used today because they are very flexible and their models are well understood. Also, SQL, the lingua franca of relational data, is commonly known among programmers.  
 
 The one downside of relational databases is their storage models don't lend themselves well to storing or retrieving
 huge amounts of data.  Query operations against relational tables typically require accessing multiple indexes and
