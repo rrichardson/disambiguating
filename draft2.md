@@ -1,8 +1,8 @@
 # Disambiguating Databases
 
-The topic of data storage is one that doesn't need to be well understood until something goes wrong (data disappears), or something goes really right (too many customers). Because databases can be treated like black boxes with an API, their inner workings are often overlooked. They're often treated as magic things that just take data when offered, and supply it when asked. Since these two operations are the only understood activities of the technology, they are often the only feature points presented when one is comparing different technologies.
+The topic of data storage is one that doesn't need to be well understood until something goes wrong (data disappears), or something goes really right (too many customers). Because databases can be treated like black boxes with an API, their inner workings are often overlooked. They're often treated as magic things that just take data when offered, and supply it when asked. Since these two operations are the only understood activities of the technology, they are often the only feature points presented when one is comparing different technologies. 
 
-But what exactly is an *operation*? Within the realm of databases, this could mean any number of things. Is that operation a transaction? Is it an indexing of data? A retrieval from an index? Does it store the data to a durable medium like a hard disk, or does it beam it by laser towards Alpha Centauri? 
+Benchmarks are often provided in *operations* per second, but what exactly is an *operation*? Within the realm of databases, this could mean any number of things. Is that operation a transaction? Is it an indexing of data? A retrieval from an index? Does it store the data to a durable medium like a hard disk, or does it beam it by laser towards Alpha Centauri? 
 
 It is this ambiguity that causes havoc in the software industry. Misunderstanding the features and guarantees of a database system can cause, at best, user consternation due to slowness or unavailability. At worst, it could result in fiscal damage, or even jail time due to loss data. 
 
@@ -16,28 +16,29 @@ Applying this feature driven approach, the reader should see two benefits. First
 Before we dig into the features of databases, lets first discuss why one wouldn't just take all of the features.  The
 short answer is that each feature typically comes with a performance cost, if not a complexity cost. 
 
-Most of the functions performed by a database, as well as the algorithms that implement them, are built to work around the
-performance bottleneck that is the hard disk.  If you have a requirement that your data (and metadata) be durable, then you must pay
-this penalty one way or another. 
+Most of the functions performed by a database, as well as the algorithms that implement them, are built to work around the performance bottleneck that is the hard disk.  If you have a requirement that your data (and metadata) be durable, then you must pay this penalty one way or another. 
 
 ### The Hard Disk
 
-The highest latency operation you will encounter within a data center is a seek to a random location on a hard disk. At
-present, 7200 RPM disks have a seek time of about 4ms.  The SATA Bus of a typical server (Ivy Bridge Architecture) has a
- theoretical max bandwidth of 750MB/s.  That seems high, but compared to the Ivy Bridge PCI 3 Bus, which has 40 channels of approximately 1GB/s it is tiny.  Compared to its memory bus, which can do 14.9GB/s per channel (with at least 4 channels), it is minuscule.  [Source: Ivy Bridge Architecture](http://en.wikipedia.org/wiki/LGA_2011)
+The SATA Bus of a typical server (Ivy Bridge Architecture) has a theoretical max bandwidth of 750MB/s.  That seems high, but compared to the Ivy Bridge PCI 3 Bus, which has 40 channels of approximately 1GB/s it is tiny.  Compared to its memory bus, which can do 14.9GB/s per channel (with at least 4 channels), it is minuscule. The lowest bandwidth data path within a modern server**[1].  (Source: [Ivy Bridge Architecture](http://en.wikipedia.org/wiki/LGA_2011))
+
+In addition to the bandwidth bottleneck, there is also latency to consider. The highest latency operation you will encounter within a data center is a seek to a random location on a hard disk. At present, 7200 RPM disks have a seek time of about 4ms. That means it can find and read new locations on disk about 250 times a second.  If your server application relies on finding something on disk at every request, you will be capped at 250 requests per second per disk. 
 
 > *SSDs have brought massive latency and throughput improvements to disks. A seek on an SSD is about 60 times faster than a hard disk. They bring their own challenges, however, one interesting one is that the storage cells within an SSD have a fixed lifetime, that is, they can only handle so many writes to them before they fail.  For this reason, they have specialized firmware that spreads writes around the disk, garbage collects, and does other bookkeeping operations. Because of this, they have less predictable performance characteristics (though they are predictably faster than hard disks) *
 
-Once a location has been found, successive append-to, or read-from operations at that location are significantly cheaper.  This is called a sequential read or write. 
-Algorithms regarding data storage and retrieval have been optimized against this fact since magnetic rotating disks were invented.
+Once a location has been found, successive append-to, or read-from operations at that same location are significantly cheaper.  This is called a sequential read or write.  Algorithms regarding data storage and retrieval have been optimized against this fact since magnetic rotating disks were invented.  Typically people will refer to file operations as either random, or sequential, signifying the strong distinction between their relative performance cost. 
 
 ### The Page Cache
 
-Because of the massive latency, and relatively low throughput of hard drives, one optimization that is found in nearly every operating system is the page cache, or buffer cache.
+Because of the high latency, and low throughput of hard drives, one optimization that is found in nearly every operating system is the page cache, or buffer cache.
 
-As its name implies, the purpose of the page cache is to optimize disk access by transparently storing contents of files in memory pages mapped to disk by the operating system's kernel.  The idea is that the same local parts of a disk or a file will be read or written many times in a short period of time.  This is usually true for databases. 
+As its name implies, the purpose of the page cache is to transparently optimize away the cost of disk access by storing contents of files in memory pages mapped to the disk by the operating system's kernel.  The idea is that the same local parts of a disk or a file will be read or written many times in a short period of time.  This is usually true for databases. 
 
-When a read occurs, if the file contents are not in the cache, it will simultaneously load the data into the cache, and return the data. A write will modify the contents of the cache, but not necessarily write to the hard disk itself.  This is to eliminate as many disk accesses as possible. Assuming that writing a record of data takes 5ms, and you have to write 20 different records to disk, performing these operations in the page cache and then flushing to disk would cost you only a single disk access, rather than 20.  The performance saving add up quickly.  
+When a read occurs, if the file contents are not in the cache, it will simultaneously load the data into the cache, and return the data. A write will modify the contents of the cache, but not necessarily write to the hard disk itself.  This is to eliminate as many disk accesses as possible. Assuming that writing a record of data takes 5ms, and you have to write 20 different records to disk, performing these operations in the page cache and then flushing to disk would cost you only a single disk access, rather than 20. Considering that accessing main memory on a machine is about 40,000 times faster than finding data on disk, the performance saving add up quickly.[2]
+
+Every operating system has a different model for how it flushes its changes to disk, but almost all work with the
+scheduler to find appropriate points to silently sync the data in memory onto disk. Files and pages can also be manually
+flushed to disk. This is useful when you need to guarantee that data changes are made permanent. 
 
 > **CAUTION** : The page cache is a significant source of optimization, but can also be a source of danger. If writes to the page cache are not flushed to disk, and a power, disk or kernel failure occurs, you will lose your data.  Be mindful of this when analyzing database solutions which leverage the page cache exclusively for their durability operations.
 
@@ -63,15 +64,13 @@ Most database systems fall distinctly into one camp, but might offer features of
 
 #### Relational Models
 
-Relational databases have enjoyed the most popularity throughout recent history. Early on, it was because they made
-efficient use of a very rare and valuable resource, hard-disk space.  Lately, however, hard-disk space is incredibly
-cheap. Despite the original requirement being now irrelevant, they are still widely used today because they are very flexible and their models are well understood. Also, SQL, the lingua franca of relational data, is commonly known among programmers.  
+Relational databases have enjoyed popularity throughout recent history. Throughout the 80's and 90's, the chief feature of relational models was that they made efficient use of a very rare and valuable resource: hard-disk space.  As of late, the relative cost of disk storage has fallen.[3]  Despite the original requirement being no longer relevant, they are still widely used today because of their flexibility, and well understood models. Also, SQL, the lingua franca of relational data, is commonly known among programmers.  
 
 The one downside of relational databases is their storage models don't lend themselves well to storing or retrieving
 huge amounts of data.  Query operations against relational tables typically require accessing multiple indexes and
 sophisticated schemes which work well for 1GB of data, but not so well for 1TB of data.  
 
-Relational database allow arbitrary dissection of data into "tables" which are defined by a schema. A schema defines the valid data types which will be the "columns" of the data. Columns are the segments of "rows" of data inserted into the database.  The advantage of relational databases is they can store data in a
+Relational databases allow arbitrary dissection of data into "tables" which are defined by a schema. A schema defines the valid data types which will be the "columns" of the data. Columns are the segments of "rows" of data inserted into the database.  The advantage of relational databases is they can store data in a
 compact way. By logically breaking up data sets into "logically atomic" parts, data can be referenced instead of
 replicated.  When retrieving these objects, the database engine or the client application must fetch these parts and
 re-assemble them.  This typically involves joins to additional tables and/or indexes, which increased the overhead and
@@ -83,7 +82,7 @@ disk space in return for greater CPU and disk load.
 **Benefits of this model**
 * Lowest disk space utilization
 * Well understood model and query language. 
-* Flexible model to support a wide varity of use cases.
+* Flexible, can support a wide varity of use cases.
 * Schema enforced data consistency
 
 **Downsides of this model**
@@ -98,7 +97,7 @@ Key-value stores have been around since the beginning of persistent storage. The
 complexity and overhead of relational systems were not required.  Because of their simplicity, efficient storage
 models and low runtime overhead, they can usually manage orders of magnitude more operations per second than relational
 databases. Lately they are used as a replacement for log collectors, since they can provide basic (usually time based)
-indexing. 
+indexing while maintaining high throughput. 
 
 Key value stores operate quite simply by having a single data type, typically a chunk of bytes, in a tree, which in turn
 points to a single, opaque record. With this simplified model, the system can be heavily optimized towards reading or
@@ -107,14 +106,13 @@ before being stored on disk. This can drastically reduce the bandwidth required 
 big gains. 
 
 Through clever row and column creation, and even schema application, key-value stores can be made to simulate some
-relational features. They are typically less flexible, however.  If multiple indexes are needed, typically the 2nd index
-is just more key-value records.  This means that the application itself must complicate its logic by performing multiple
-lookups. 
+relational features. They are typically less flexible, however.  If multiple indexes are needed, they are simulated
+through additional key-value lookups.
 
 **Benefits of this model**
 * Fast
 * Fairly flexible
-* Simple, therefore the executables are small with limited dependencies. 
+* Simple, easily understood storage model. 
 
 **Downsides of this model**
 * Often no schema support, so no consistency checks
@@ -124,10 +122,10 @@ lookups.
 
 A model that has achieved popularity relatively recently is the hiercharchal model.  The major advantage of the
 hierarchical model is that of ergonomics.  The data is stored and retrieved from the database in the way it stored
-within objects, which is typically the way the data is represented in real life.
+within objects in an application. 
 
-The hiercharchical model stores all relevant data in a single record, which has delineations for multiple keys and
-values, where the values could, themselves be additional associations of keys and values.  
+The hiercharchical model tends to store all relevant data in a single record, which has delineations for multiple keys and
+values, where the values could be additional associations of keys and values.  
 
 In the general case, all of the data of a real-world object would be found within a single record. This means that it
 will necessarily use more storage space than the relational model, because it is replicating the data instead of
@@ -138,11 +136,11 @@ Because the data being stored is very heterogeneous in nature, compression is ca
 not used. 
 
 Hierarchical databases typically do offer some relational features, such as foreign references and multiple indexes.
-Many such databases do not offer any schema support, as data structure is arbitrary. 
+Many such databases do not offer any schema support, as the data structure is arbitrary. 
 
 **Benefits of this model**
 * The most flexible
-* Arbitrary indexes support easy access to data*
+* Arbitrary indexes support easy access to data
 * Highest fidelity between application data structures and on-disk data structures. 
 
 **Downsides of this model**
@@ -164,11 +162,11 @@ However, it reduces flexibility, since it means that only a single client applic
 the data at one time.  It also poses additional risks: Since they share the same process, if the client application
 crashes, so does the database. 
 
-If the Database runs in a seperate process, typically a protocol over TCP/IP is used.  Many RDBMSs (and recently, other
-datbases) support either the ODBC or JDBC protocols, which are standardized database connectivity protocols.  This
+If the Database runs in a separate process, typically a protocol over TCP/IP is used.  Many RDBMSs (and recently, other
+databases) support either the ODBC or JDBC protocols, which are standardized database connectivity protocols.  This
 simplifies the creation of client applications, as the number of libraries which can leverage these protocols are
-plentiful.  A network protocol does drastically improve flexibility of a database, but TCP ip carries with it latency
-and bandwidth penalties vs those of memory. 
+plentiful.  A network protocol does drastically improve flexibility of a database, but TCP carries with it latency
+and bandwidth penalties vs direct memory access. 
 
 #### SQL vs Not
 
@@ -176,18 +174,16 @@ SQL is a declarative language that was designed originally as a mechanism to sim
 relational data.  Its usage is ubiquitous, and as such, many developers speak the language fluently, this can aid the
 adoption of a database within an organization and at large. 
 
-> *A note on NoSQL:  The biggest "innovation" touted by most NoSQL databases was simply achieving faster operations by removing transactions and relational tables.  Many of those databases began to support SQL as an API language, even though they didn't need the relational features. Some of the features of SQL such as querying, filtering and aggregating were quite useful.  So it was said that that No-SQL should be renamed to No-ACID, because of their lack of transaction support.  Now many of those same databases have transactional support.  These days, NoSQL might be more accurately called No-Relational, but NoSQL sounds better and is close enough. 
+> *A note on NoSQL:*  The biggest "innovation" touted by most NoSQL databases was simply achieving faster operations by removing transactions and relational tables.  Many of those databases began to support SQL as an API language, even though they didn't use its relational features. Some of the features of SQL such as querying, filtering and aggregating were quite useful.  So it was said that that No-SQL databases should be renamed to No-ACID, because of their lack of transaction support.  Now many of those same databases have transactional support.  These days, NoSQL might be more accurately called No-Relational, but NoSQL sounds better and is close enough. 
 
-The downside of SQL is that it must be parsed and compiled by the database engine in order to be used.  This imposes a
-runtime hit. Most database engines or client APIs work around this by pre-compiling the SQL based function calls into
+A challenge of SQL is that it must be parsed and compiled by the database engine in order to be used.  This imposes a
+runtime overhead. Most database engines or client APIs work around this by pre-compiling the SQL based function calls into
 prepared statement, which are pre-compiled, or compiled on first run, then the compiled version is saved and used for
 future calls. 
 
-SQL cannot effectively describe all data relationships.  Hierarchical data, for instance, can not leverage SQL so
-database which are hierarchical in nature. "Document", JSON or XML databases fall into this category. 
+SQL cannot effectively describe all data relationships. As an example, hierarchical relationships are very difficult to describe in SQL.  In addition, because of its declarative nature, iterations or other imperative operations are not describable in the hcore SQL specification. The SQL language specification has been expanded to include recursion to address both iteration and hierarchical relationships. In addition, vendors have provided non-standard extensions of their own. [4](http://en.wikipedia.org/wiki/Hierarchical_and_recursive_queries_in_SQL)
 
-In many cases the features of databases are so sparse, lacking features such as indexing or aggregation, there is is simply no reason to
-support the complexity of a SQL parsing and execution engine. Many in key-value stores fall into this category. 
+In many cases the features of databases are so sparse, lacking features such as indexing or aggregation, there is is simply no reason to support the complexity of a SQL parsing and execution engine. Key-value stores often fall into this category. 
 
 
 ### Transactions
@@ -199,14 +195,13 @@ for database transactions is ACID, which stands for Atomic, Consistent, Isolated
 > **NOTE** ACID is just a recipe. Many database systems claim support for transactions or "lightweight" transactions,
 > but they may not provide all of the features of ACID, but only those that are convenient/efficient to support. For
 > instance, many distributed databases offer the concept of transactions without the Isolation step. This means that the
-> data is being modified in-place, and other transactions see that data while its being modified.  One can work around
-> this if they know that it is there, if they don't however, the results could be disastrous. 
+> data is being modified in-place, and other transactions see that data while its being modified. One can work around
+> this if they expect this behavior. If they don't, the results could be disastrous. 
 
 Let's briefly look at the ACID guarantees, and then what a DB might do to provide them. 
 
 ##### Atomicity
 Within a transaction, there could be multiple operations. Atomicity guarantees that all operations will either succeed or fail together. Why is this necessary? Let's look at a simple social network database example: 
-    
 
     BEGIN TRANSACTION;
         DELETE "MY_WALL_PIC|http://pics.com/pic_of_dead_cat.jpg" from cover_page;
@@ -214,7 +209,7 @@ Within a transaction, there could be multiple operations. Atomicity guarantees t
         INSERT "Hey all. Check out tonight's dinner!" into wall;
     END TRANSACTION;
 
-In this not at all contrived example. We see a problem here if some of these instructions succeed without the others. 
+In this not at all contrived example, we see a problem here if some of these instructions succeed without the others. 
 
 If the last instruction succeeds, but the previous two instructions fail, then we might be giving viewers of this page some very incorrect information.
 
@@ -409,5 +404,9 @@ We now know that write benchmarks for an ACID, b-tree style database should come
 As with all software systems, ensure that a database's features match your requirements before comparing speed.
 
 It may just save your data. 
+
+[1](http://en.wikipedia.org/wiki/LGA_2011)
+[2](http://www.eecs.berkeley.edu/~rcs/research/interactive_latency.html)
+[3](http://www.mkomo.com/cost-per-gigabyte-update)
 
 
